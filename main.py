@@ -92,17 +92,37 @@ def deleteAccount():
         return 1
     return 0
 
-def getPassword(user_id, user_password):
-    cat_name = input("Name of the service (for example, YouTube): ")
+def getAllNames(user_id):
+    db_con = dbConnect()
+    db_cur = db_con.cursor()
+    select_name_sql = "SELECT name FROM passwords WHERE user_id = ?"
+    db_cur.execute(select_name_sql, (user_id,))
+    names = db_cur.fetchall()
+    return names
 
-def storePassword(user_id, user_password):
+def getPassword(user_id, user_password, key):
+    cat_name = input("Name of the service (for example, YouTube): ")
+    db_con = dbConnect()
+    db_cur = db_con.cursor()
+    print(cat_name)
+    select_password_sql = "SELECT password FROM passwords WHERE name = ? AND user_id = ?"
+    db_cur.execute(select_password_sql, (cat_name, user_id))
+    hashed_passwordBytes = db_cur.fetchall()[0][0].encode()
+    fern = Fernet(key)
+    passwordBytes = fern.decrypt(hashed_passwordBytes)
+    password = passwordBytes.decode() 
+
+    db_con.commit()
+    db_con.close()
+    return password
+
+def storePassword(user_id, user_password, key):
     cat_name = input("Name of the service (for example, YouTube): ")
     app_password = getpass.getpass("Password: ")
 
     db_con = dbConnect()
     db_cur = db_con.cursor()
 
-    key = base64.urlsafe_b64encode(kdf.derive(user_password.encode()))
     fern = Fernet(key)
     hashed_pass = fern.encrypt(app_password.encode())
     
@@ -113,7 +133,41 @@ def storePassword(user_id, user_password):
     # regular_pass = fern.decrypt(hashed_pass)
     # print(regular_pass)
 
+def editPassword(user_id, user_password, key):
+    cat_name = input("Name of the service (for example, YouTube): ")
+    app_password = getpass.getpass("Old Password: ")
+    new_app_password = getpass.getpass("New Password: ")
+    confirm_pass = getpass.getpass("Confirm New Password: ")
+    if new_app_password != confirm_pass:
+        print("New passwords don't match")
+        return 0
+    db_con = dbConnect()
+    db_cur = db_con.cursor()
+    fern = Fernet(key)
+
+    select_password_sql = "SELECT * FROM passwords WHERE name = ?"
+    db_cur.execute(select_password_sql, (cat_name,))
+    passRecord = db_cur.fetchall()[0]
+
+    decryptOldPass = fern.decrypt(passRecord[3].encode()).decode()
+    print(decryptOldPass)
+    if app_password != decryptOldPass:
+        print("Old password incorrect")
+        return 0
+    update_password_sql = "UPDATE passwords SET password = ? WHERE name = ?"
+
+
+    hashed_pass = fern.encrypt(new_app_password.encode()).decode()
+    old_hashed_pass = fern.encrypt(app_password.encode()).decode()
+
+    db_cur.execute(update_password_sql, (hashed_pass, cat_name))
+
+    db_con.commit()
+    db_con.close()
+    return 1
+
     
+
     
 user = tuple()
 
@@ -140,12 +194,33 @@ while True:
             print("Incorrect password")
 print("Welcome to chameleo-pass, a client side only password vault")
 print("store and edit passwords")
+key = base64.urlsafe_b64encode(kdf.derive(user[1].encode()))
 while True:
-    print("gp - get password\nsp - store password\nep - edit password\nlo - log out")
+    print("gp - get password\ngn - get all names\nsp - store password\nep - edit password\nlo - log out")
     decision = input("> ")
 
     if decision == "gp":
-        getPassword(user[0], user[1])
+        password = getPassword(user[0], user[1], key)
+        if len(password) == 0:
+            print("No password found with that name :(")
+
+    if decision == "gn":
+        print("Displaying all names stored: ")
+        names = getAllNames(user[0])
+        for i in range(len(names)):
+            print(names[i][0])
+        print("")
 
     if decision == "sp":
-        storePassword(user[0], user[1])
+        storePassword(user[0], user[1], key)
+
+    if decision == "ep":
+        edit = editPassword(user[0], user[1], key)
+        if edit:
+            print("Successfully changed password")
+        else:
+            print("Wrong password")
+
+    if decision == "lo":
+        print("Logging out...")
+        exit()
